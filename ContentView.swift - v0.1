@@ -1,0 +1,148 @@
+import SwiftUI
+import WatchKit
+
+// MARK: - SYSTEM MODELS
+struct MenuItem: Identifiable, Hashable {
+    let id = UUID()
+    let name: String
+    let subtitle: String
+    let icon: String
+    let color: Color
+}
+
+// MARK: - MAIN OS ENGINE (Zen Hub Skeleton)
+struct ContentView: View {
+    @State private var scrollAmount: Double = 0
+    @State private var selectedIndex: Int = 0
+    @State private var path = NavigationPath()
+    @FocusState private var isListFocused: Bool
+    
+    // The curated list of Hub apps
+    let items: [MenuItem] = [
+        MenuItem(name: "Music", subtitle: "Now Playing", icon: "play.fill", color: .pink),
+        MenuItem(name: "Calculator", subtitle: "Mathematics", icon: "plus.forwardslash.minus", color: .orange),
+        MenuItem(name: "Calendar", subtitle: "Up Next", icon: "calendar", color: .red),
+        MenuItem(name: "Reminders", subtitle: "Tasks", icon: "list.bullet.clipboard.fill", color: .blue),
+        MenuItem(name: "Medications", subtitle: "Schedule", icon: "pills.fill", color: .teal),
+        MenuItem(name: "Phone", subtitle: "Favorites", icon: "phone.fill", color: .green),
+        MenuItem(name: "Messages", subtitle: "Compose", icon: "bubble.left.fill", color: .green),
+        MenuItem(name: "Mail", subtitle: "Inbox", icon: "envelope.fill", color: .indigo)
+    ]
+    
+    var body: some View {
+        NavigationStack(path: $path) {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                
+                // Restored Liquid Glass Orb
+                Circle()
+                    .fill(items[selectedIndex].color.opacity(0.2))
+                    .blur(radius: 40)
+                    .offset(y: -80)
+                
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 12) {
+                            Color.clear.frame(height: 10) // Top padding
+                            ForEach(0..<items.count, id: \.self) { index in
+                                MenuCard(item: items[index], isSelected: selectedIndex == index)
+                                    .id(index)
+                                    .onTapGesture { handleItemTap(items[index]) }
+                            }
+                            Color.clear.frame(height: 20)
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                    .focusable()
+                    .focused($isListFocused)
+                    .digitalCrownRotation($scrollAmount, from: 0, through: Double(items.count - 1), by: 1, sensitivity: .low, isContinuous: false, isHapticFeedbackEnabled: true)
+                    .onChange(of: scrollAmount) { _, newValue in
+                        let newIndex = Int(round(newValue))
+                        if newIndex != selectedIndex {
+                            WKInterfaceDevice.current().play(.click)
+                            // Restored Spring Animation
+                            withAnimation(.interpolatingSpring(stiffness: 300, damping: 25)) {
+                                selectedIndex = newIndex
+                                proxy.scrollTo(selectedIndex, anchor: .center)
+                            }
+                        }
+                    }
+                }
+            }
+            .onAppear { isListFocused = true }
+            .navigationDestination(for: MenuItem.self) { item in
+                PendingView(item: item)
+            }
+        }
+    }
+    
+    func handleItemTap(_ item: MenuItem) {
+        WKInterfaceDevice.current().play(.start)
+        path.append(item)
+    }
+}
+
+// MARK: - SHARED UI: LIQUID MENU CARD
+struct MenuCard: View {
+    let item: MenuItem; let isSelected: Bool
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(isSelected ? .white.opacity(0.2) : item.color.opacity(0.1))
+                Image(systemName: item.icon).font(.system(size: 14, weight: .black)).foregroundStyle(isSelected ? .white : item.color)
+            }.frame(width: 38, height: 38)
+            
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.name).font(.system(size: 16, weight: .heavy, design: .rounded))
+                Text(item.subtitle).font(.system(size: 10)).foregroundStyle(isSelected ? .white.opacity(0.9) : .secondary)
+            }
+            
+            Spacer()
+            if isSelected { Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.3)) }
+        }
+        .padding(12)
+        // Restored frosted liquid glass look with active gradient highlighting
+        .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(isSelected ? AnyShapeStyle(item.color.gradient) : AnyShapeStyle(Color.white.opacity(0.07))))
+        .scaleEffect(isSelected ? 1.04 : 0.96)
+        .padding(.horizontal, isSelected ? 4 : 12)
+    }
+}
+
+// MARK: - SKELETON: PENDING IMPLEMENTATION VIEW
+struct PendingView: View {
+    let item: MenuItem
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            
+            // Hero Icon
+            ZStack {
+                Circle()
+                    .fill(item.color.gradient.opacity(0.2))
+                    .frame(width: 80, height: 80)
+                
+                Image(systemName: item.icon)
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(item.color)
+            }
+            
+            // Text Content
+            VStack(spacing: 4) {
+                Text(item.name)
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                
+                Text("Pending Implementation")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            
+            Spacer()
+        }
+        .padding()
+        .navigationTitle(item.name)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
