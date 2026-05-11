@@ -1,0 +1,326 @@
+import SwiftUI
+import WatchKit
+import AVFoundation
+import Combine
+import MediaPlayer
+
+// MARK: - Models
+struct MenuItem: Identifiable, Hashable {
+    let id = UUID()
+    let name: String; let subtitle: String; let icon: String
+    let url: String; let color: Color
+}
+
+// MARK: - Main Interface
+struct ContentView: View {
+    @State private var scrollAmount: Double = 0
+    @State private var selectedIndex: Int = 0
+    @State private var path = NavigationPath()
+    @Environment(\.openURL) var openURL
+    @FocusState private var isListFocused: Bool
+    
+    @State private var currentTrackTitle = "Music"
+    @State private var albumArt: UIImage? = nil
+    
+    let items: [MenuItem] = [
+        MenuItem(name: "Music", subtitle: "Now Playing", icon: "music.note", url: "internal", color: .pink),
+        MenuItem(name: "Calculator", subtitle: "Compact UI", icon: "divide.circle.fill", url: "internal", color: .yellow),
+        MenuItem(name: "Voice Memos", subtitle: "Live Recording", icon: "mic.badge.plus", url: "internal", color: .cyan),
+        MenuItem(name: "Phone", subtitle: "Recents", icon: "phone.fill", url: "tel:0000000000", color: .green),
+        MenuItem(name: "Messages", subtitle: "Sarah: Hey!", icon: "bubble.left.fill", url: "sms:0000000000", color: .green),
+        MenuItem(name: "Mail", subtitle: "Inbox", icon: "envelope.fill", url: "mailto:test@example.com", color: .blue)
+    ]
+    
+    var body: some View {
+        NavigationStack(path: $path) {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                
+                // Ambient Glow
+                Circle()
+                    .fill(items[selectedIndex].color.opacity(0.15))
+                    .blur(radius: 40)
+                    .offset(y: -80)
+                
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 12) {
+                            Color.clear.frame(height: 15) // Small top buffer
+                            
+                            ForEach(0..<items.count, id: \.self) { index in
+                                MenuCard(
+                                    item: items[index],
+                                    isSelected: selectedIndex == index,
+                                    dynamicSubtitle: items[index].name == "Music" ? currentTrackTitle : nil,
+                                    customArt: items[index].name == "Music" ? albumArt : nil
+                                )
+                                .id(index)
+                                .onTapGesture { handleItemTap(items[index]) }
+                            }
+                            Color.clear.frame(height: 20)
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                    .focusable()
+                    .focused($isListFocused)
+                    .digitalCrownRotation($scrollAmount, from: 0, through: Double(items.count - 1), by: 1, sensitivity: .low, isContinuous: false, isHapticFeedbackEnabled: true)
+                    .onChange(of: scrollAmount) { _, newValue in
+                        let newIndex = Int(round(newValue))
+                        if newIndex != selectedIndex {
+                            WKInterfaceDevice.current().play(.click)
+                            withAnimation(.interpolatingSpring(stiffness: 300, damping: 25)) {
+                                selectedIndex = newIndex
+                                proxy.scrollTo(selectedIndex, anchor: .center)
+                            }
+                        }
+                    }
+                }
+            }
+            .onAppear {
+                isListFocused = true
+                fetchNowPlaying()
+            }
+            .navigationDestination(for: MenuItem.self) { item in
+                DetailView(item: item)
+            }
+        }
+    }
+    
+    func handleItemTap(_ item: MenuItem) {
+        if item.url == "internal" { path.append(item) }
+        else if let url = URL(string: item.url) { openURL(url) }
+    }
+    
+    func fetchNowPlaying() {
+        let info = MPNowPlayingInfoCenter.default().nowPlayingInfo
+        if let title = info?[MPMediaItemPropertyTitle] as? String { currentTrackTitle = title }
+        if let artwork = info?[MPMediaItemPropertyArtwork] as? MPMediaItemArtwork {
+            albumArt = artwork.image(at: CGSize(width: 80, height: 80))
+        }
+    }
+}
+
+// MARK: - Navigation Router
+struct DetailView: View {
+    let item: MenuItem
+    var body: some View {
+        Group {
+            switch item.name {
+            case "Calculator": RebuiltCalculatorView()
+            case "Voice Memos": RealVoiceRecorderView()
+            case "Music": MusicDetailView()
+            default: Text("Unavailable").foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle(item.name)
+    }
+}
+
+// MARK: - POLISHED CALCULATOR
+struct RebuiltCalculatorView: View {
+    @State private var accum = "0"
+    @State private var op: String?
+    @State private var runningVal = 0.0
+    
+    let grid = [
+        ["7", "8", "9", "÷"],
+        ["4", "5", "6", "×"],
+        ["1", "2", "3", "-"],
+        ["C", "0", "=", "+"]
+    ]
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(accum)
+                .font(.system(size: 26, weight: .bold, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 10)
+                .foregroundStyle(.yellow)
+            
+            ForEach(grid, id: \.self) { row in
+                HStack(spacing: 4) {
+                    ForEach(row, id: \.self) { btn in
+                        Button(action: { press(btn) }) {
+                            Text(btn)
+                                .font(.system(size: 18, weight: .black, design: .rounded))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(height: 32)
+                        .background(.white.opacity(0.1))
+                        .background(isOp(btn) ? Color.orange.opacity(0.8) : (btn == "C" ? Color.red.opacity(0.8) : Color.clear))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.1), lineWidth: 0.5))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 5)
+    }
+    
+    func isOp(_ s: String) -> Bool { ["÷","×","-","+","="].contains(s) }
+    func press(_ btn: String) {
+        WKInterfaceDevice.current().play(.click)
+        if Int(btn) != nil {
+            accum = (accum == "0") ? btn : accum + btn
+        } else if btn == "C" {
+            accum = "0"; runningVal = 0; op = nil
+        } else if btn == "=" {
+            calc()
+        } else {
+            runningVal = Double(accum) ?? 0
+            op = btn
+            accum = "0"
+        }
+    }
+    func calc() {
+        let cur = Double(accum) ?? 0
+        switch op {
+            case "+": runningVal += cur
+            case "-": runningVal -= cur
+            case "×": runningVal *= cur
+            case "÷": runningVal = cur != 0 ? runningVal / cur : 0
+            default: return
+        }
+        accum = String(format: "%g", runningVal)
+        op = nil
+    }
+}
+
+// MARK: - POLISHED RECORDER
+class RecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate {
+    var audioRecorder: AVAudioRecorder?
+    @Published var isRecording = false
+    @Published var recordings: [URL] = []
+    
+    override init() { super.init(); fetch() }
+    
+    func start() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playAndRecord, mode: .default)
+        try? session.setActive(true)
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Rec-\(Int(Date().timeIntervalSince1970)).m4a")
+        let settings: [String: Any] = [AVFormatIDKey: Int(kAudioFormatMPEG4AAC), AVSampleRateKey: 12000, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]
+        audioRecorder = try? AVAudioRecorder(url: url, settings: settings)
+        audioRecorder?.delegate = self
+        audioRecorder?.record()
+        isRecording = true
+    }
+    
+    func stop() {
+        audioRecorder?.stop()
+        isRecording = false
+        fetch()
+    }
+    
+    func fetch() {
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let content = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
+        recordings = content?.filter { $0.pathExtension == "m4a" }.sorted(by: { $0.lastPathComponent > $1.lastPathComponent }) ?? []
+    }
+}
+
+struct RealVoiceRecorderView: View {
+    @StateObject var mgr = RecorderManager()
+    var body: some View {
+        VStack(spacing: 10) {
+            if mgr.isRecording {
+                VStack {
+                    Image(systemName: "waveform").font(.system(size: 40)).symbolEffect(.variableColor.iterative.reversing).foregroundStyle(.cyan)
+                    Text("RECORDING").font(.system(size: 10, weight: .black)).kerning(2)
+                }.frame(maxHeight: .infinity)
+            } else {
+                List(mgr.recordings, id: \.self) { rec in
+                    HStack {
+                        Image(systemName: "mic.fill").font(.system(size: 10)).foregroundStyle(.cyan)
+                        VStack(alignment: .leading) {
+                            Text(rec.lastPathComponent).font(.system(size: 10, design: .monospaced))
+                            Text("M4A Audio").font(.system(size: 8)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .listRowBackground(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.05)))
+                }
+                .listStyle(.carousel)
+            }
+            
+            Button(action: {
+                WKInterfaceDevice.current().play(.directionUp)
+                mgr.isRecording ? mgr.stop() : mgr.start()
+            }) {
+                ZStack {
+                    Circle().fill(mgr.isRecording ? .red : .cyan)
+                    Image(systemName: mgr.isRecording ? "stop.fill" : "record.circle").font(.title3).foregroundStyle(.black)
+                }
+            }
+            .buttonStyle(.plain)
+            .frame(width: 45, height: 45)
+            .padding(.bottom, 5)
+        }
+    }
+}
+
+// MARK: - MUSIC VIEW
+struct MusicDetailView: View {
+    @State private var rotation = 0.0
+    var body: some View {
+        VStack(spacing: 15) {
+            ZStack {
+                Circle().fill(.pink.opacity(0.15)).blur(radius: 25)
+                Circle().stroke(.white.opacity(0.1), lineWidth: 1)
+                Image(systemName: "music.quarternote.3").font(.system(size: 40)).foregroundStyle(.pink)
+                    .rotationEffect(.degrees(rotation))
+            }
+            .frame(width: 100, height: 100)
+            .onAppear { withAnimation(.linear(duration: 10).repeatForever(autoreverses: false)) { rotation = 360 } }
+            
+            VStack(spacing: 2) {
+                Text("Mini Pod Audio").font(.system(size: 16, weight: .bold, design: .rounded))
+                Text("Listening on Ultra 2").font(.caption2).foregroundStyle(.secondary)
+            }
+            
+            HStack(spacing: 30) {
+                Image(systemName: "backward.fill")
+                Image(systemName: "play.fill").font(.title2)
+                Image(systemName: "forward.fill")
+            }.foregroundStyle(.white)
+        }
+    }
+}
+
+// MARK: - UPGRADED MENU CARD
+struct MenuCard: View {
+    let item: MenuItem
+    let isSelected: Bool
+    var dynamicSubtitle: String? = nil
+    var customArt: UIImage? = nil
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                if let art = customArt {
+                    Image(uiImage: art).resizable().aspectRatio(contentMode: .fill).clipShape(Circle())
+                } else {
+                    Circle().fill(isSelected ? .white.opacity(0.2) : item.color.opacity(0.1))
+                    Image(systemName: item.icon).font(.system(size: 14, weight: .black)).foregroundStyle(isSelected ? .white : item.color)
+                }
+            }
+            .frame(width: 38, height: 38)
+            
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.name).font(.system(size: 16, weight: .heavy, design: .rounded))
+                Text(dynamicSubtitle ?? item.subtitle).font(.system(size: 10)).foregroundStyle(isSelected ? .white.opacity(0.9) : .secondary).lineLimit(1)
+            }
+            Spacer()
+            if isSelected { Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.3)) }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(isSelected ? AnyShapeStyle(item.color.gradient) : AnyShapeStyle(Color.white.opacity(0.07)))
+                .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.05), lineWidth: 0.5))
+        )
+        .scaleEffect(isSelected ? 1.04 : 0.96)
+        .padding(.horizontal, isSelected ? 4 : 12)
+    }
+}
